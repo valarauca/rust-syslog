@@ -257,6 +257,21 @@ pub fn init(facility: Facility, log_level: log::LogLevelFilter,
 }
 
 impl Logger {
+  /// format a message as a RFC 3164 but this uses a UTC time stamp and
+  /// follows strick ISO 8601 format to ensure logstash is happy
+  pub fn format_3164_logstash<T: fmt::Display>(&self, severity:Severity, message: T) -> String {
+    if let Some(ref hostname) = self.hostname {
+        format!("<{}>{} {} {}[{}]: {}",
+          self.encode_priority(severity, self.facility),
+          time::now_utc().strftime("%y-%m-%dT%H:%M:%SZ").unwrap(),
+          hostname, self.process, self.pid, message)
+    } else {
+        format!("<{}>{} {}[{}]: {}",
+          self.encode_priority(severity, self.facility),
+          time::now_utc().strftime("%y-%m-%dT%H:%M:%SZ").unwrap(),
+          self.process, self.pid, message)
+    }
+  }
   /// format a message as a RFC 3164 log message
   pub fn format_3164<T: fmt::Display>(&self, severity:Severity, message: T) -> String {
     if let Some(ref hostname) = self.hostname {
