@@ -71,11 +71,13 @@ pub enum Severity {
 
 enum LoggerBackend {
   /// Unix socket, temp file path, log file path
-  Unix(UnixDatagram),
+  Unix(Arc<Mutex<UnixDatagram>>),
   UnixStream(Arc<Mutex<UnixStream>>),
   Udp(Box<UdpSocket>, SocketAddr),
   Tcp(Arc<Mutex<TcpStream>>)
 }
+unsafe impl Send for LoggerBackend { }
+unsafe impl Sync for LoggerBackend { }
 
 #[derive(Debug)]
 pub struct SyslogError {
@@ -104,6 +106,8 @@ pub struct Logger {
   pid:      i32,
   s:        LoggerBackend
 }
+unsafe impl Send for Logger { }
+unsafe impl Sync for Logger { }
 
 /// Returns a Logger using unix socket to target local syslog ( using /dev/log or /var/run/syslog)
 pub fn unix(facility: Facility) -> Result<Box<Logger>, io::Error> {
@@ -125,7 +129,7 @@ pub fn unix_custom<P: AsRef<Path>>(facility: Facility, path: P) -> Result<Box<Lo
                 hostname: None,
                 process:  process_name,
                 pid:      pid,
-                s:        LoggerBackend::Unix(sock),
+                s:        LoggerBackend::Unix(Arc::new(Mutex::new(sock))),
             }))
         },
         Err(ref e) if e.raw_os_error() == Some(libc::EPROTOTYPE) => {
@@ -325,7 +329,10 @@ impl Logger {
   /// Sends a message directly, without any formatting
   pub fn send_raw(&self, message: &[u8]) -> Result<usize, io::Error> {
     match self.s {
-      LoggerBackend::Unix(ref dgram) => dgram.send(&message[..]),
+      LoggerBackend::Unix(ref dgram) => {
+          let mut dgram = dgram.lock().unwrap();
+          dgram.send(&message[..])
+      },
       LoggerBackend::UnixStream(ref socket_wrap) => {
         let mut socket = socket_wrap.lock().unwrap();
         let null = [0 ; 1];
@@ -377,19 +384,6 @@ impl Logger {
 
   pub fn process_id(&self) -> i32 {
     self.pid
-  }
-
-  pub fn set_process_name(&mut self, name: String) {
-    self.process = name
-  }
-
-  pub fn set_process_id(&mut self, id: i32) {
-    self.pid = id
-  }
-  
-  /// Changes facility
-  pub fn set_facility(&mut self, facility: Facility) {
-    self.facility = facility;
   }
 }
 
